@@ -78,7 +78,6 @@ To run it, follow these steps:
 
 ### Step 1: Start ZooKeeper by running `bin/zkServer.sh start` from a copy 
 of the distribution package.
-### OUJT:What is this?
 
 ### Step 2: Start the master
 ```
