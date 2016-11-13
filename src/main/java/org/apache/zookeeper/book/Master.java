@@ -58,30 +58,30 @@ import org.slf4j.LoggerFactory;
  * throughout the book. The master is responsible for tracking the list of
  * available workers, determining when there are new tasks and assigning
  * them to available workers. 
- * 
+ *
  * The flow without crashes is like this. The master reads the list of
  * available workers and watch for changes to the list of workers. It also
  * reads the list of tasks and watches for changes to the list of tasks.
  * For each new task, it assigns the task to a worker chosen at random.
- * 
+ *
  * Before exercising the role of master, this ZooKeeper client first needs
  * to elect a primary master. It does it by creating a /master znode. If
  * it succeeds, then it exercises the role of master. Otherwise, it watches
  * the /master znode, and if it goes away, it tries to elect a new primary
  * master.
- * 
+ *
  * The states of this client are three: RUNNING, ELECTED, NOTELECTED. 
  * RUNNING means that according to its view of the ZooKeeper state, there
  * is no primary master (no master has been able to acquire the /master lock).
  * If some master succeeds in creating the /master znode and this master learns
  * it, then it transitions to ELECTED if it is the primary and NOTELECTED
  * otherwise.
- *   
+ *
  * Because workers may crash, this master also needs to be able to reassign
  * tasks. When it watches for changes in the list of workers, it also 
  * receives a notification when a znode representing a worker is gone, so 
  * it is able to reassign its tasks.
- * 
+ *
  * A primary may crash too. In the case a primary crashes, the next primary
  * that takes over the role needs to make sure that it assigns and reassigns
  * tasks that the previous primary hasn't had time to process.
@@ -89,7 +89,7 @@ import org.slf4j.LoggerFactory;
  */
 public class Master implements Watcher, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(Master.class);
-    
+
     /*
      * A master process can be either running for
      * primary master, elected primary master, or
@@ -99,34 +99,34 @@ public class Master implements Watcher, Closeable {
     enum MasterStates {RUNNING, ELECTED, NOTELECTED};
 
     private volatile MasterStates state = MasterStates.RUNNING;
-    
+
     MasterStates getState() {
         return state;
     }
-    
+
     private Random random = new Random(this.hashCode());
     private ZooKeeper zk;
     private String hostPort;
     private String serverId = Integer.toHexString( random.nextInt() );
     private volatile boolean connected = false;
     private volatile boolean expired = false;
-    
+
     protected ChildrenCache tasksCache;
     protected ChildrenCache workersCache;
-    
+
     /**
      * Creates a new master instance.
-     * 
+     *
      * @param hostPort
      */
-    Master(String hostPort) { 
+    Master(String hostPort) {
         this.hostPort = hostPort;
     }
-    
-    
+
+
     /**
      * Creates a new ZooKeeper session.
-     * 
+     *
      * @throws IOException
      */
     void startZK() throws IOException {
@@ -141,15 +141,15 @@ public class Master implements Watcher, Closeable {
     void stopZK() throws InterruptedException, IOException {
         zk.close();
     }
-    
+
     /**
      * This method implements the process method of the
      * Watcher interface. We use it to deal with the
      * different states of a session. 
-     * 
+     *
      * @param e new session event to be processed
      */
-    public void process(WatchedEvent e) {  
+    public void process(WatchedEvent e) {
         LOG.info("Processing event: " + e.toString());
         if(e.getType() == Event.EventType.None){
             switch (e.getState()) {
@@ -168,8 +168,8 @@ public class Master implements Watcher, Closeable {
             }
         }
     }
-    
-    
+
+
     /**
      * This method creates some parent znodes we need for this example.
      * In the case the master is restarted, then this method does not
@@ -181,19 +181,19 @@ public class Master implements Watcher, Closeable {
         createParent("/tasks", new byte[0]);
         createParent("/status", new byte[0]);
     }
-    
+
     void createParent(String path, byte[] data){
-        zk.create(path, 
-                data, 
-                Ids.OPEN_ACL_UNSAFE, 
+        zk.create(path,
+                data,
+                Ids.OPEN_ACL_UNSAFE,
                 CreateMode.PERSISTENT,
-                createParentCallback, 
+                createParentCallback,
                 data);
     }
-    
+
     StringCallback createParentCallback = new StringCallback() {
         public void processResult(int rc, String path, Object ctx, String name) {
-            switch (Code.get(rc)) { 
+            switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 /*
                  * Try again. Note that registering again is not a problem.
@@ -201,35 +201,35 @@ public class Master implements Watcher, Closeable {
                  * NODEEXISTS event back.
                  */
                 createParent(path, (byte[]) ctx);
-                
+
                 break;
             case OK:
                 LOG.info("Parent created");
-                
+
                 break;
             case NODEEXISTS:
                 LOG.warn("Parent already registered: " + path);
-                
+
                 break;
             default:
-                LOG.error("Something went wrong: ", 
+                LOG.error("Something went wrong: ",
                         KeeperException.create(Code.get(rc), path));
             }
         }
     };
-        
+
     /**
      * Check if this client is connected.
-     * 
+     *
      * @return boolean ZooKeeper client is connected
      */
     boolean isConnected() {
         return connected;
     }
-    
+
     /**
      * Check if the ZooKeeper session has expired.
-     * 
+     *
      * @return boolean ZooKeeper session has expired
      */
     boolean isExpired() {
@@ -243,8 +243,8 @@ public class Master implements Watcher, Closeable {
      **************************************
      **************************************
      */
-    
-    
+
+
     /*
      * The story in this callback implementation is the following.
      * We tried to create the master lock znode. If it suceeds, then
@@ -262,10 +262,10 @@ public class Master implements Watcher, Closeable {
      */
     StringCallback masterCreateCallback = new StringCallback() {
         public void processResult(int rc, String path, Object ctx, String name) {
-            switch (Code.get(rc)) { 
+            switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 checkMaster();
-                
+
                 break;
             case OK:
                 state = MasterStates.ELECTED;
@@ -275,11 +275,11 @@ public class Master implements Watcher, Closeable {
             case NODEEXISTS:
                 state = MasterStates.NOTELECTED;
                 masterExists();
-                
+
                 break;
             default:
                 state = MasterStates.NOTELECTED;
-                LOG.error("Something went wrong when running for master.", 
+                LOG.error("Something went wrong when running for master.",
                         KeeperException.create(Code.get(rc), path));
             }
             LOG.info("I'm " + (state == MasterStates.ELECTED ? "" : "not ") + "the leader " + serverId);
@@ -287,18 +287,18 @@ public class Master implements Watcher, Closeable {
     };
 
     void masterExists() {
-        zk.exists("/master", 
-                masterExistsWatcher, 
-                masterExistsCallback, 
+        zk.exists("/master",
+                masterExistsWatcher,
+                masterExistsCallback,
                 null);
     }
-    
+
     StatCallback masterExistsCallback = new StatCallback() {
         public void processResult(int rc, String path, Object ctx, Stat stat){
-            switch (Code.get(rc)) { 
+            switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 masterExists();
-                
+
                 break;
             case OK:
                 break;
@@ -306,30 +306,30 @@ public class Master implements Watcher, Closeable {
                 state = MasterStates.RUNNING;
                 runForMaster();
                 LOG.info("It sounds like the previous master is gone, " +
-                    		"so let's run for master again."); 
-                
+                    		"so let's run for master again.");
+
                 break;
-            default:     
+            default:
                 checkMaster();
                 break;
             }
         }
     };
-    
+
     Watcher masterExistsWatcher = new Watcher(){
         public void process(WatchedEvent e) {
             if(e.getType() == EventType.NodeDeleted) {
                 assert "/master".equals( e.getPath() );
-                
+
                 runForMaster();
             }
         }
     };
-    
+
     void takeLeadership() {
         LOG.info("Going for list of workers");
         getWorkers();
-        
+
         (new RecoveredAssignments(zk)).recover( new RecoveryCallback() {
             public void recoveryComplete(int rc, List<String> tasks) {
                 if(rc == RecoveryCallback.FAILED) {
@@ -350,31 +350,31 @@ public class Master implements Watcher, Closeable {
      * znode has been created. In the case the znode exists, it needs to check
      * which server is the master.
      */
-    
+
     /**
      * Tries to create a /master lock znode to acquire leadership.
      */
     public void runForMaster() {
         LOG.info("Running for master");
-        zk.create("/master", 
-                serverId.getBytes(), 
-                Ids.OPEN_ACL_UNSAFE, 
+        zk.create("/master",
+                serverId.getBytes(),
+                Ids.OPEN_ACL_UNSAFE,
                 CreateMode.EPHEMERAL,
                 masterCreateCallback,
                 null);
     }
-        
+
     DataCallback masterCheckCallback = new DataCallback() {
         public void processResult(int rc, String path, Object ctx, byte[] data, Stat stat) {
             switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 checkMaster();
-                
+
                 break;
             case NONODE:
                 runForMaster();
-                
-                break; 
+
+                break;
             case OK:
                 if( serverId.equals( new String(data) ) ) {
                     state = MasterStates.ELECTED;
@@ -383,15 +383,15 @@ public class Master implements Watcher, Closeable {
                     state = MasterStates.NOTELECTED;
                     masterExists();
                 }
-                
+
                 break;
             default:
-                LOG.error("Error when reading data.", 
-                        KeeperException.create(Code.get(rc), path));               
+                LOG.error("Error when reading data.",
+                        KeeperException.create(Code.get(rc), path));
             }
-        } 
+        }
     };
-        
+
     void checkMaster() {
         zk.getData("/master", false, masterCheckCallback, null);
     }
@@ -403,11 +403,11 @@ public class Master implements Watcher, Closeable {
      ****************************************************
      ****************************************************
      */
-    
-    
+
+
     /**
      * This method is here for testing purposes.
-     * 
+     *
      * @return size Size of the worker list
      */
     public int getWorkersSize(){
@@ -417,38 +417,38 @@ public class Master implements Watcher, Closeable {
             return workersCache.getList().size();
         }
     }
-    
+
     Watcher workersChangeWatcher = new Watcher() {
         public void process(WatchedEvent e) {
             if(e.getType() == EventType.NodeChildrenChanged) {
                 assert "/workers".equals( e.getPath() );
-                
+
                 getWorkers();
             }
         }
     };
-    
+
     void getWorkers(){
-        zk.getChildren("/workers", 
-                workersChangeWatcher, 
-                workersGetChildrenCallback, 
+        zk.getChildren("/workers",
+                workersChangeWatcher,
+                workersGetChildrenCallback,
                 null);
     }
-    
+
     ChildrenCallback workersGetChildrenCallback = new ChildrenCallback() {
         public void processResult(int rc, String path, Object ctx, List<String> children){
-            switch (Code.get(rc)) { 
+            switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 getWorkers();
                 break;
             case OK:
-                LOG.info("Succesfully got a list of workers: " 
-                        + children.size() 
+                LOG.info("Succesfully got a list of workers: "
+                        + children.size()
                         + " workers");
                 reassignAndSet(children);
                 break;
             default:
-                LOG.error("getChildren failed",  
+                LOG.error("getChildren failed",
                         KeeperException.create(Code.get(rc), path));
             }
         }
@@ -461,10 +461,10 @@ public class Master implements Watcher, Closeable {
      *******************
      *******************
      */
-    
+
     void reassignAndSet(List<String> children){
         List<String> toProcess;
-        
+
         if(workersCache == null) {
             workersCache = new ChildrenCache(children);
             toProcess = null;
@@ -472,36 +472,36 @@ public class Master implements Watcher, Closeable {
             LOG.info( "Removing and setting" );
             toProcess = workersCache.removedAndSet( children );
         }
-        
+
         if(toProcess != null) {
             for(String worker : toProcess){
                 getAbsentWorkerTasks(worker);
             }
         }
     }
-    
+
     void getAbsentWorkerTasks(String worker){
         zk.getChildren("/assign/" + worker, false, workerAssignmentCallback, null);
     }
-    
+
     ChildrenCallback workerAssignmentCallback = new ChildrenCallback() {
         public void processResult(int rc, String path, Object ctx, List<String> children){
-            switch (Code.get(rc)) { 
+            switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 getAbsentWorkerTasks(path);
-                
+
                 break;
             case OK:
-                LOG.info("Succesfully got a list of assignments: " 
-                        + children.size() 
+                LOG.info("Succesfully got a list of assignments: "
+                        + children.size()
                         + " tasks");
                 
                 /*
                  * Reassign the tasks of the absent worker.  
                  */
-                
+
                 for(String task: children) {
-                    getDataReassign(path + "/" + task, task);                    
+                    getDataReassign(path + "/" + task, task);
                 }
                 break;
             default:
@@ -515,29 +515,29 @@ public class Master implements Watcher, Closeable {
      * Recovery of tasks assigned to absent worker. * 
      ************************************************
      */
-    
+
     /**
      * Get reassigned task data.
-     * 
+     *
      * @param path Path of assigned task
      * @param task Task name excluding the path prefix
      */
     void getDataReassign(String path, String task) {
-        zk.getData(path, 
-                false, 
-                getDataReassignCallback, 
+        zk.getData(path,
+                false,
+                getDataReassignCallback,
                 task);
     }
-    
+
     /**
      * Context for recreate operation.
      *
      */
     class RecreateTaskCtx {
-        String path; 
+        String path;
         String task;
         byte[] data;
-        
+
         RecreateTaskCtx(String path, String task, byte[] data) {
             this.path = path;
             this.task = task;
@@ -552,12 +552,12 @@ public class Master implements Watcher, Closeable {
         public void processResult(int rc, String path, Object ctx, byte[] data, Stat stat)  {
             switch(Code.get(rc)) {
             case CONNECTIONLOSS:
-                getDataReassign(path, (String) ctx); 
-                
+                getDataReassign(path, (String) ctx);
+
                 break;
             case OK:
                 recreateTask(new RecreateTaskCtx(path, (String) ctx, data));
-                
+
                 break;
             default:
                 LOG.error("Something went wrong when getting data ",
@@ -565,21 +565,21 @@ public class Master implements Watcher, Closeable {
             }
         }
     };
-    
+
     /**
      * Recreate task znode in /tasks
-     * 
+     *
      * @param ctx Recreate text context
      */
     void recreateTask(RecreateTaskCtx ctx) {
         zk.create("/tasks/" + ctx.task,
                 ctx.data,
-                Ids.OPEN_ACL_UNSAFE, 
+                Ids.OPEN_ACL_UNSAFE,
                 CreateMode.PERSISTENT,
                 recreateTaskCallback,
                 ctx);
     }
-    
+
     /**
      * Recreate znode callback
      */
@@ -588,34 +588,34 @@ public class Master implements Watcher, Closeable {
             switch(Code.get(rc)) {
             case CONNECTIONLOSS:
                 recreateTask((RecreateTaskCtx) ctx);
-       
+
                 break;
             case OK:
                 deleteAssignment(((RecreateTaskCtx) ctx).path);
-                
+
                 break;
             case NODEEXISTS:
                 LOG.info("Node exists already, but if it hasn't been deleted, " +
                 		"then it will eventually, so we keep trying: " + path);
                 recreateTask((RecreateTaskCtx) ctx);
-                
+
                 break;
             default:
-                LOG.error("Something wwnt wrong when recreating task", 
+                LOG.error("Something wwnt wrong when recreating task",
                         KeeperException.create(Code.get(rc)));
             }
         }
     };
-    
+
     /**
      * Delete assignment of absent worker
-     * 
+     *
      * @param path Path of znode to be deleted
      */
     void deleteAssignment(String path){
         zk.delete(path, -1, taskDeletionCallback, null);
     }
-    
+
     VoidCallback taskDeletionCallback = new VoidCallback(){
         public void processResult(int rc, String path, Object rtx){
             switch(Code.get(rc)) {
@@ -626,9 +626,9 @@ public class Master implements Watcher, Closeable {
                 LOG.info("Task correctly deleted: " + path);
                 break;
             default:
-                LOG.error("Failed to delete task data" + 
+                LOG.error("Failed to delete task data" +
                         KeeperException.create(Code.get(rc), path));
-            } 
+            }
         }
     };
     
@@ -639,53 +639,53 @@ public class Master implements Watcher, Closeable {
      ******************************************************
      ******************************************************
      */
-      
+
     Watcher tasksChangeWatcher = new Watcher() {
         public void process(WatchedEvent e) {
             if(e.getType() == EventType.NodeChildrenChanged) {
                 assert "/tasks".equals( e.getPath() );
-                
+
                 getTasks();
             }
         }
     };
-    
+
     void getTasks(){
-        zk.getChildren("/tasks", 
-                tasksChangeWatcher, 
-                tasksGetChildrenCallback, 
+        zk.getChildren("/tasks",
+                tasksChangeWatcher,
+                tasksGetChildrenCallback,
                 null);
     }
-    
+
     ChildrenCallback tasksGetChildrenCallback = new ChildrenCallback() {
         public void processResult(int rc, String path, Object ctx, List<String> children){
-            switch(Code.get(rc)) { 
+            switch(Code.get(rc)) {
             case CONNECTIONLOSS:
                 getTasks();
-                
+
                 break;
             case OK:
                 List<String> toProcess;
                 if(tasksCache == null) {
                     tasksCache = new ChildrenCache(children);
-                    
+
                     toProcess = children;
                 } else {
                     toProcess = tasksCache.addedAndSet( children );
                 }
-                
+
                 if(toProcess != null){
                     assignTasks(toProcess);
-                } 
-                
+                }
+
                 break;
             default:
-                LOG.error("getChildren failed.",  
+                LOG.error("getChildren failed.",
                         KeeperException.create(Code.get(rc), path));
             }
         }
     };
-    
+
     void assignTasks(List<String> tasks) {
         for(String task : tasks){
             getTaskData(task);
@@ -693,108 +693,112 @@ public class Master implements Watcher, Closeable {
     }
 
     void getTaskData(String task) {
-        zk.getData("/tasks/" + task, 
-                false, 
-                taskDataCallback, 
+        zk.getData("/tasks/" + task,
+                false,
+                taskDataCallback,
                 task);
     }
-    
+
     DataCallback taskDataCallback = new DataCallback() {
         public void processResult(int rc, String path, Object ctx, byte[] data, Stat stat)  {
-            switch(Code.get(rc)) { 
+            switch(Code.get(rc)) {
             case CONNECTIONLOSS:
                 getTaskData((String) ctx);
-                
+
                 break;
             case OK:
                 /*
                  * Choose worker at random.
                  */
-                List<String> list = workersCache.getList();
-                String designatedWorker = list.get(random.nextInt(list.size()));
+                if (workersCache.getList().size() > 0) {
+                    List<String> list = workersCache.getList();
+                    String designatedWorker = list.get(random.nextInt(list.size()));
                 
                 /*
                  * Assign task to randomly chosen worker.
                  */
-                String assignmentPath = "/assign/" + 
-                        designatedWorker + 
-                        "/" + 
-                        (String) ctx;
-                LOG.info( "Assignment path: " + assignmentPath );
-                createAssignment(assignmentPath, data);
-                
+                    String assignmentPath = "/assign/" +
+                            designatedWorker +
+                            "/" +
+                            (String) ctx;
+                    LOG.info( "Assignment path: " + assignmentPath );
+                    createAssignment(assignmentPath, data);
+                } else {
+                    LOG.info( "No worker for assigning tasks.");
+                }
+
                 break;
             default:
-                LOG.error("Error when trying to get task data.", 
+                LOG.error("Error when trying to get task data.",
                         KeeperException.create(Code.get(rc), path));
             }
         }
     };
-    
+
     void createAssignment(String path, byte[] data){
-        zk.create(path, 
-                data, 
-                Ids.OPEN_ACL_UNSAFE, 
+        zk.create(path,
+                data,
+                Ids.OPEN_ACL_UNSAFE,
                 CreateMode.PERSISTENT,
-                assignTaskCallback, 
+                assignTaskCallback,
                 data);
     }
-    
+
     StringCallback assignTaskCallback = new StringCallback() {
         public void processResult(int rc, String path, Object ctx, String name) {
-            switch(Code.get(rc)) { 
+            switch(Code.get(rc)) {
             case CONNECTIONLOSS:
                 createAssignment(path, (byte[]) ctx);
-                
+
                 break;
             case OK:
                 LOG.info("Task assigned correctly: " + name);
                 deleteTask(name.substring( name.lastIndexOf("/") + 1));
-                
+
                 break;
-            case NODEEXISTS: 
+            case NODEEXISTS:
                 LOG.warn("Task already assigned");
-                
+
                 break;
             default:
-                LOG.error("Error when trying to assign task.", 
+                LOG.error("Error when trying to assign task.",
                         KeeperException.create(Code.get(rc), path));
             }
         }
     };
-    
+
     /*
      * Once assigned, we delete the task from /tasks
      */
     void deleteTask(String name){
         zk.delete("/tasks/" + name, -1, taskDeleteCallback, null);
     }
-    
+
     VoidCallback taskDeleteCallback = new VoidCallback(){
         public void processResult(int rc, String path, Object ctx){
             switch (Code.get(rc)) {
             case CONNECTIONLOSS:
                 deleteTask(path);
-                
+
                 break;
             case OK:
                 LOG.info("Successfully deleted " + path);
-                
+
                 break;
             case NONODE:
                 LOG.info("Task has been deleted already");
-                
+
                 break;
             default:
-                LOG.error("Something went wrong here, " + 
+                LOG.error("Something went wrong here, " +
                         KeeperException.create(Code.get(rc), path));
             }
         }
     };
-    
+
     /**
      * Closes the ZooKeeper session. 
-     * 
+     *
      * @throws IOException
      */
     @Override
@@ -807,17 +811,17 @@ public class Master implements Watcher, Closeable {
             }
         }
     }
-    
+
     /**
      * Main method providing an example of how to run the master.
-     * 
+     *
      * @param args
      * @throws Exception
      */
-    public static void main(String args[]) throws Exception { 
+    public static void main(String args[]) throws Exception {
         Master m = new Master(args[0]);
         m.startZK();
-        
+
         while(!m.isConnected()){
             Thread.sleep(100);
         }
@@ -830,11 +834,11 @@ public class Master implements Watcher, Closeable {
          * now runs for master.
          */
         m.runForMaster();
-        
+
         while(!m.isExpired()){
             Thread.sleep(1000);
-        }   
+        }
 
         m.stopZK();
-    }    
+    }
 }
